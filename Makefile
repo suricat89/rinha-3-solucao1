@@ -21,7 +21,7 @@ image-cleanup:
 	@for i in $$(docker image ls --filter "reference=rinha-3-solucao1-publisher-1" --filter "reference=rinha-3-solucao1-publisher-2" --format "{{.ID}}"); do docker image rm -f $$i; done
 
 run: image-cleanup
-	docker compose -f ./docker-compose.yml up
+	docker compose up --build
 
 stats:
 	docker container stats rinha-nginx rinha-redis rinha-publisher-consumer-1 rinha-publisher-consumer-2

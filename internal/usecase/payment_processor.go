@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/sony/gobreaker"
@@ -18,8 +19,8 @@ type paymentProcessorUseCase struct {
 }
 
 type IPaymentProcessorUseCase interface {
-	PostPayment(correlationId string, amount float32) error
-	GetPayments(fromTime time.Time, toTime time.Time) map[string]*repository.SummaryResult
+	ProcessPayment(correlationId string, amount float32) error
+	GetPayments(fromTime time.Time, toTime time.Time) map[string]*SummaryResult
 	PurgePayments() error
 }
 
@@ -46,10 +47,11 @@ func NewPaymentProcessorUseCase(
 	}
 }
 
-func (p *paymentProcessorUseCase) PostPayment(correlationId string, amount float32) error {
+func (p *paymentProcessorUseCase) ProcessPayment(correlationId string, amount float32) error {
 	requestedAt := time.Now()
+	processorId := "default"
 	_, err := p.cb.Execute(func() (any, error) {
-		timeout := 6 * time.Second
+		timeout := 10 * time.Second
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
@@ -69,19 +71,34 @@ func (p *paymentProcessorUseCase) PostPayment(correlationId string, amount float
 
 	if err != nil {
 		requestedAt = time.Now()
+		processorId = "fallback"
 		err = p.fallbackService.PostPayment(correlationId, amount, requestedAt)
-		if err == nil {
-			p.cacheRepository.AddPayment("fallback", correlationId, requestedAt, amount)
+		if err != nil {
+			return err
 		}
-		return err
 	}
 
-	p.cacheRepository.AddPayment("default", correlationId, requestedAt, amount)
+	p.cacheRepository.AddPayment(processorId, correlationId, requestedAt, amount)
 	return nil
 }
 
-func (p *paymentProcessorUseCase) GetPayments(fromTime time.Time, toTime time.Time) map[string]*repository.SummaryResult {
-	return p.cacheRepository.GetPayments(fromTime, toTime)
+func (p *paymentProcessorUseCase) GetPayments(fromTime time.Time, toTime time.Time) map[string]*SummaryResult {
+	summaryItems := p.cacheRepository.GetPayments(fromTime, toTime)
+	summary := map[string]*SummaryResult{
+		"default":  {TotalRequests: 0, TotalAmount: 0.0},
+		"fallback": {TotalRequests: 0, TotalAmount: 0.0},
+	}
+
+	for _, summaryItem := range summaryItems {
+		summary[summaryItem.ProcessorId].TotalRequests++
+		summary[summaryItem.ProcessorId].TotalAmountCents += int64(math.Round(summaryItem.Amount * 100))
+	}
+
+	for _, summaryResult := range summary {
+		summaryResult.TotalAmount = float64(summaryResult.TotalAmountCents) / 100
+	}
+
+	return summary
 }
 
 func (p *paymentProcessorUseCase) PurgePayments() error {

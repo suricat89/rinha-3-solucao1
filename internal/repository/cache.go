@@ -19,7 +19,7 @@ type cacheRepository struct {
 
 type ICacheRepository interface {
 	AddPayment(processorId string, correlationId string, requestedAt time.Time, amount float32) error
-	GetPayments(fromTime time.Time, toTime time.Time) map[string]*SummaryResult
+	GetPayments(fromTime time.Time, toTime time.Time) []*SummaryItem
 	PurgePayments() error
 }
 
@@ -50,7 +50,7 @@ func (c *cacheRepository) AddPayment(processorId string, correlationId string, r
 	}).Err()
 }
 
-func (c *cacheRepository) GetPayments(fromTime time.Time, toTime time.Time) map[string]*SummaryResult {
+func (c *cacheRepository) GetPayments(fromTime time.Time, toTime time.Time) []*SummaryItem {
 	fromMillis := strconv.FormatInt(fromTime.UnixMilli(), 10)
 	toMillis := strconv.FormatInt(toTime.UnixMilli(), 10)
 
@@ -64,33 +64,28 @@ func (c *cacheRepository) GetPayments(fromTime time.Time, toTime time.Time) map[
 		return nil
 	}
 
-	summary := map[string]*SummaryResult{
-		"default":  {TotalRequests: 0, TotalAmount: 0.0},
-		"fallback": {TotalRequests: 0, TotalAmount: 0.0},
-	}
-
+	summaryItems := make([]*SummaryItem, 0)
 	for _, member := range members {
 		parts := strings.Split(member, ":")
 		if len(parts) != 3 {
 			continue
 		}
-		processorID := parts[0]
+		processorId := parts[0]
+		correlationId := parts[1]
 		amount, err := strconv.ParseFloat(parts[2], 64)
 		if err != nil {
 			continue
 		}
 
-		if s, ok := summary[processorID]; ok {
-			s.TotalRequests++
-			s.TotalAmountCents += int64(amount * 100)
-		}
+		summaryItems = append(summaryItems, &SummaryItem{
+			ProcessorId: processorId,
+			CorrelationId: correlationId,
+			Amount: amount,
+		})
 	}
 
-	for _, summaryResult := range summary {
-		summaryResult.TotalAmount = float64(summaryResult.TotalAmountCents) / 100
-	}
+	return summaryItems
 
-	return summary
 }
 
 func (c *cacheRepository) PurgePayments() error {

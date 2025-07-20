@@ -35,6 +35,10 @@ func (c *consumer) StartConsumer(amountGoroutines int) {
 func (c *consumer) consume() {
 	for {
 		paymentRequest := c.queue.Consume()
-		c.paymentProcessorUseCase.PostPayment(paymentRequest.CorrelationId, paymentRequest.Amount)
+		err := c.paymentProcessorUseCase.ProcessPayment(paymentRequest.CorrelationId, paymentRequest.Amount)
+		if err != nil {
+			c.queue.Publish(paymentRequest)
+		}
 	}
 }
+
