@@ -93,7 +93,7 @@ func (p *paymentProcessorUseCase) ProcessPayment(correlationId string, amount fl
 		}
 	}
 
-	p.cacheRepository.AddPayment(processorId, correlationId, requestedAt, amount)
+	p.cacheRepository.AddPayment(processorId, correlationId, requestedAt, time.Now(), amount)
 	return nil
 }
 
@@ -107,6 +107,8 @@ func (p *paymentProcessorUseCase) GetPayments(fromTime time.Time, toTime time.Ti
 	for _, summaryItem := range summaryItems {
 		summary[summaryItem.ProcessorId].TotalRequests++
 		summary[summaryItem.ProcessorId].TotalAmountCents += int64(math.Round(summaryItem.Amount * 100))
+		summary[summaryItem.ProcessorId].LatestRequestedAt = summaryItem.RequestedAt
+		summary[summaryItem.ProcessorId].LatestResponseAt = summaryItem.ResponseAt
 	}
 
 	for _, summaryResult := range summary {

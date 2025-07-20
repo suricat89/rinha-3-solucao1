@@ -18,7 +18,7 @@ type cacheRepository struct {
 }
 
 type ICacheRepository interface {
-	AddPayment(processorId string, correlationId string, requestedAt time.Time, amount float32) error
+	AddPayment(processorId string, correlationId string, requestedAt time.Time, responseAt time.Time, amount float32) error
 	GetPayments(fromTime time.Time, toTime time.Time) []*SummaryItem
 	PurgePayments() error
 }
@@ -40,9 +40,22 @@ func NewCacheRepository(ctx context.Context, host string, port int) ICacheReposi
 	return &cacheRepository{key, ctx, client}
 }
 
-func (c *cacheRepository) AddPayment(processorId string, correlationId string, requestedAt time.Time, amount float32) error {
+func (c *cacheRepository) AddPayment(
+	processorId string,
+	correlationId string,
+	requestedAt time.Time,
+	responseAt time.Time,
+	amount float32,
+) error {
 	score := float64(requestedAt.UnixNano())
-	member := fmt.Sprintf("%s:%s:%.2f", processorId, correlationId, amount)
+	member := fmt.Sprintf(
+		"%s|%s|%s|%s|%.2f",
+		processorId,
+		correlationId,
+		requestedAt.Format(time.RFC3339Nano),
+		responseAt.Format(time.RFC3339Nano),
+		amount,
+	)
 
 	return c.client.ZAdd(c.ctx, c.key, &redis.Z{
 		Score:  score,
@@ -66,13 +79,21 @@ func (c *cacheRepository) GetPayments(fromTime time.Time, toTime time.Time) []*S
 
 	summaryItems := make([]*SummaryItem, 0)
 	for _, member := range members {
-		parts := strings.Split(member, ":")
-		if len(parts) != 3 {
+		parts := strings.Split(member, "|")
+		if len(parts) != 5 {
 			continue
 		}
 		processorId := parts[0]
 		correlationId := parts[1]
-		amount, err := strconv.ParseFloat(parts[2], 64)
+		requestedAt, err := time.Parse(time.RFC3339Nano, parts[2])
+		if err != nil {
+			continue
+		}
+		responseAt, err := time.Parse(time.RFC3339Nano, parts[3])
+		if err != nil {
+			continue
+		}
+		amount, err := strconv.ParseFloat(parts[4], 64)
 		if err != nil {
 			continue
 		}
@@ -80,6 +101,8 @@ func (c *cacheRepository) GetPayments(fromTime time.Time, toTime time.Time) []*S
 		summaryItems = append(summaryItems, &SummaryItem{
 			ProcessorId:   processorId,
 			CorrelationId: correlationId,
+			RequestedAt:   requestedAt,
+			ResponseAt:    responseAt,
 			Amount:        amount,
 		})
 	}
