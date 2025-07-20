@@ -41,7 +41,7 @@ func NewCacheRepository(ctx context.Context, host string, port int) ICacheReposi
 }
 
 func (c *cacheRepository) AddPayment(processorId string, correlationId string, requestedAt time.Time, amount float32) error {
-	score := float64(requestedAt.UnixMilli())
+	score := float64(requestedAt.UnixNano())
 	member := fmt.Sprintf("%s:%s:%.2f", processorId, correlationId, amount)
 
 	return c.client.ZAdd(c.ctx, c.key, &redis.Z{
@@ -51,8 +51,8 @@ func (c *cacheRepository) AddPayment(processorId string, correlationId string, r
 }
 
 func (c *cacheRepository) GetPayments(fromTime time.Time, toTime time.Time) []*SummaryItem {
-	fromMillis := strconv.FormatInt(fromTime.UnixMilli(), 10)
-	toMillis := strconv.FormatInt(toTime.UnixMilli(), 10)
+	fromMillis := strconv.FormatInt(fromTime.UnixNano(), 10)
+	toMillis := strconv.FormatInt(toTime.UnixNano(), 10)
 
 	members, err := c.client.ZRangeByScore(c.ctx, c.key, &redis.ZRangeBy{
 		Min: fromMillis,
