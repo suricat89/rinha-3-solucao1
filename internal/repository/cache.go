@@ -78,9 +78,9 @@ func (c *cacheRepository) GetPayments(fromTime time.Time, toTime time.Time) []*S
 		}
 
 		summaryItems = append(summaryItems, &SummaryItem{
-			ProcessorId: processorId,
+			ProcessorId:   processorId,
 			CorrelationId: correlationId,
-			Amount: amount,
+			Amount:        amount,
 		})
 	}
 

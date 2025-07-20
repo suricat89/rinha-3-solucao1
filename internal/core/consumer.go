@@ -26,6 +26,7 @@ func NewConsumer(
 }
 
 func (c *consumer) StartConsumer(amountGoroutines int) {
+	go c.paymentProcessorUseCase.MonitorServiceHealth()
 	for range amountGoroutines {
 		go c.consume()
 	}

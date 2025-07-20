@@ -1,7 +1,6 @@
 package usecase
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"time"
@@ -16,11 +15,13 @@ type paymentProcessorUseCase struct {
 	fallbackService paymentprocessor.IPaymentProcessorService
 	cacheRepository repository.ICacheRepository
 	cb              *gobreaker.CircuitBreaker
+	serviceStatus   ServiceStatus
 }
 
 type IPaymentProcessorUseCase interface {
 	ProcessPayment(correlationId string, amount float32) error
 	GetPayments(fromTime time.Time, toTime time.Time) map[string]*SummaryResult
+	MonitorServiceHealth()
 	PurgePayments() error
 }
 
@@ -44,33 +45,47 @@ func NewPaymentProcessorUseCase(
 		fallbackService,
 		cacheRepository,
 		cb,
+		ServiceStatus{
+			paymentprocessor.DefaultProcessor:  {Failing: false, MinResponseTime: 0},
+			paymentprocessor.FallbackProcessor: {Failing: false, MinResponseTime: 0},
+		},
+	}
+}
+
+func (p *paymentProcessorUseCase) MonitorServiceHealth() {
+	ticker := time.Tick(5 * time.Second)
+
+	checkServiceHealth := func(service paymentprocessor.IPaymentProcessorService) {
+		serviceHealth, err := service.GetHealth()
+		if err != nil {
+			fmt.Printf("Error validating %s service health: %v", service.GetProcessorId(), err)
+			return
+		}
+		p.serviceStatus[service.GetProcessorId()] = serviceHealth
+	}
+
+	for range ticker {
+		go checkServiceHealth(p.defaultService)
+		go checkServiceHealth(p.fallbackService)
 	}
 }
 
 func (p *paymentProcessorUseCase) ProcessPayment(correlationId string, amount float32) error {
-	requestedAt := time.Now()
+	requestedAt := time.Now().Add(
+		time.Duration(p.serviceStatus[paymentprocessor.DefaultProcessor].MinResponseTime) *
+			time.Millisecond,
+	)
 	processorId := "default"
 	_, err := p.cb.Execute(func() (any, error) {
-		timeout := 10 * time.Second
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-
-		done := make(chan error, 1)
-
-		go func() {
-			done <- p.defaultService.PostPayment(correlationId, amount, requestedAt)
-		}()
-
-		select {
-		case err := <-done:
-			return nil, err
-		case <-ctx.Done():
-			return nil, fmt.Errorf("timeout de %s atingido ao chamar o processador default", timeout)
-		}
+		err := p.defaultService.PostPayment(correlationId, amount, requestedAt)
+		return nil, err
 	})
 
 	if err != nil {
-		requestedAt = time.Now()
+		requestedAt = time.Now().Add(
+			time.Duration(p.serviceStatus[paymentprocessor.FallbackProcessor].MinResponseTime) *
+				time.Millisecond,
+		)
 		processorId = "fallback"
 		err = p.fallbackService.PostPayment(correlationId, amount, requestedAt)
 		if err != nil {

@@ -1,6 +1,7 @@
 package paymentprocessor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -9,16 +10,22 @@ import (
 )
 
 type paymentProcessorService struct {
-	baseUrl string
+	baseUrl     string
+	processorId ProcessorType
 }
 
 type IPaymentProcessorService interface {
+	GetProcessorId() ProcessorType
 	GetHealth() (*ServiceHealthResponse, error)
 	PostPayment(correlationId string, amount float32, requestedAt time.Time) error
 }
 
-func NewPaymentProcessorService(baseUrl string) IPaymentProcessorService {
-	return &paymentProcessorService{baseUrl}
+func NewPaymentProcessorService(baseUrl string, processorId ProcessorType) IPaymentProcessorService {
+	return &paymentProcessorService{baseUrl, processorId}
+}
+
+func (p *paymentProcessorService) GetProcessorId() ProcessorType {
+	return p.processorId
 }
 
 func (p *paymentProcessorService) GetHealth() (*ServiceHealthResponse, error) {
@@ -58,13 +65,26 @@ func (p *paymentProcessorService) PostPayment(correlationId string, amount float
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(resp)
 
-	if err := fasthttp.Do(req, resp); err != nil {
-		return err
-	}
+	timeout := 10 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-	if resp.StatusCode() != fasthttp.StatusOK {
-		return fmt.Errorf("error posting payment. status code: %d", resp.StatusCode())
-	}
+	done := make(chan error, 1)
 
-	return nil
+	go func() {
+		done <- fasthttp.Do(req, resp)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode() != fasthttp.StatusOK {
+			return fmt.Errorf("error posting payment. status code: %d", resp.StatusCode())
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("timeout de %s atingido ao chamar o processador default", timeout)
+	}
 }

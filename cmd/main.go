@@ -15,9 +15,11 @@ func main() {
 
 	processorDefault := paymentprocessor.NewPaymentProcessorService(
 		conf.Env.ProcessorDefaultBaseUrl,
+		paymentprocessor.DefaultProcessor,
 	)
 	processorFallback := paymentprocessor.NewPaymentProcessorService(
 		conf.Env.ProcessorFallbackBaseUrl,
+		paymentprocessor.FallbackProcessor,
 	)
 
 	cacheRepository := repository.NewCacheRepository(
