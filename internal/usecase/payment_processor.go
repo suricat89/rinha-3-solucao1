@@ -1,7 +1,6 @@
 package usecase
 
 import (
-	"fmt"
 	"math"
 	"time"
 
@@ -15,13 +14,11 @@ type paymentProcessorUseCase struct {
 	fallbackService paymentprocessor.IPaymentProcessorService
 	cacheRepository repository.ICacheRepository
 	cb              *gobreaker.CircuitBreaker
-	serviceStatus   ServiceStatus
 }
 
 type IPaymentProcessorUseCase interface {
 	ProcessPayment(correlationId string, amount float32) error
 	GetPayments(fromTime time.Time, toTime time.Time) map[string]*SummaryResult
-	MonitorServiceHealth()
 	PurgePayments() error
 }
 
@@ -45,36 +42,11 @@ func NewPaymentProcessorUseCase(
 		fallbackService,
 		cacheRepository,
 		cb,
-		ServiceStatus{
-			paymentprocessor.DefaultProcessor:  {Failing: false, MinResponseTime: 0},
-			paymentprocessor.FallbackProcessor: {Failing: false, MinResponseTime: 0},
-		},
-	}
-}
-
-func (p *paymentProcessorUseCase) MonitorServiceHealth() {
-	ticker := time.Tick(5 * time.Second)
-
-	checkServiceHealth := func(service paymentprocessor.IPaymentProcessorService) {
-		serviceHealth, err := service.GetHealth()
-		if err != nil {
-			fmt.Printf("Error validating %s service health: %v", service.GetProcessorId(), err)
-			return
-		}
-		p.serviceStatus[service.GetProcessorId()] = serviceHealth
-	}
-
-	for range ticker {
-		go checkServiceHealth(p.defaultService)
-		go checkServiceHealth(p.fallbackService)
 	}
 }
 
 func (p *paymentProcessorUseCase) ProcessPayment(correlationId string, amount float32) error {
-	requestedAt := time.Now().Add(
-		time.Duration(p.serviceStatus[paymentprocessor.DefaultProcessor].MinResponseTime) *
-			time.Millisecond,
-	)
+	requestedAt := time.Now()
 	processorId := "default"
 	_, err := p.cb.Execute(func() (any, error) {
 		err := p.defaultService.PostPayment(correlationId, amount, requestedAt)
@@ -82,10 +54,7 @@ func (p *paymentProcessorUseCase) ProcessPayment(correlationId string, amount fl
 	})
 
 	if err != nil {
-		requestedAt = time.Now().Add(
-			time.Duration(p.serviceStatus[paymentprocessor.FallbackProcessor].MinResponseTime) *
-				time.Millisecond,
-		)
+		requestedAt = time.Now()
 		processorId = "fallback"
 		err = p.fallbackService.PostPayment(correlationId, amount, requestedAt)
 		if err != nil {
