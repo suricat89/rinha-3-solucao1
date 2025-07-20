@@ -2,10 +2,9 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -47,68 +46,41 @@ func (c *cacheRepository) AddPayment(
 	responseAt time.Time,
 	amount float32,
 ) error {
-	score := float64(requestedAt.UnixNano())
-	member := fmt.Sprintf(
-		"%s|%s|%s|%s|%.2f",
-		processorId,
-		correlationId,
-		requestedAt.Format(time.RFC3339Nano),
-		responseAt.Format(time.RFC3339Nano),
-		amount,
-	)
-
-	return c.client.ZAdd(c.ctx, c.key, &redis.Z{
-		Score:  score,
-		Member: member,
-	}).Err()
+	summaryItem, err := json.Marshal(&SummaryItem{
+		ProcessorId:   processorId,
+		CorrelationId: correlationId,
+		RequestedAt:   requestedAt,
+		ResponseAt:    responseAt,
+		Amount:        float64(amount),
+	})
+	if err != nil {
+		fmt.Printf("Error marshalling summary item: %v", err)
+		return err
+	}
+	return c.client.HSet(c.ctx, c.key, correlationId, summaryItem).Err()
 }
 
 func (c *cacheRepository) GetPayments(fromTime time.Time, toTime time.Time) []*SummaryItem {
-	fromMillis := strconv.FormatInt(fromTime.UnixNano(), 10)
-	toMillis := strconv.FormatInt(toTime.UnixNano(), 10)
-
-	members, err := c.client.ZRangeByScore(c.ctx, c.key, &redis.ZRangeBy{
-		Min: fromMillis,
-		Max: toMillis,
-	}).Result()
-
+	items, err := c.client.HGetAll(c.ctx, c.key).Result()
 	if err != nil {
-		log.Printf("Error fetching payment summary: %v", err)
+		fmt.Printf("Error fetching transaction list from Redis: %v", err)
 		return nil
 	}
 
 	summaryItems := make([]*SummaryItem, 0)
-	for _, member := range members {
-		parts := strings.Split(member, "|")
-		if len(parts) != 5 {
-			continue
-		}
-		processorId := parts[0]
-		correlationId := parts[1]
-		requestedAt, err := time.Parse(time.RFC3339Nano, parts[2])
-		if err != nil {
-			continue
-		}
-		responseAt, err := time.Parse(time.RFC3339Nano, parts[3])
-		if err != nil {
-			continue
-		}
-		amount, err := strconv.ParseFloat(parts[4], 64)
+	for _, summaryItemStr := range items {
+		var summaryItem SummaryItem
+		err := json.Unmarshal([]byte(summaryItemStr), &summaryItem)
 		if err != nil {
 			continue
 		}
 
-		summaryItems = append(summaryItems, &SummaryItem{
-			ProcessorId:   processorId,
-			CorrelationId: correlationId,
-			RequestedAt:   requestedAt,
-			ResponseAt:    responseAt,
-			Amount:        amount,
-		})
+		if summaryItem.RequestedAt.After(fromTime) && summaryItem.RequestedAt.Before(toTime) {
+			summaryItems = append(summaryItems, &summaryItem)
+		}
 	}
 
 	return summaryItems
-
 }
 
 func (c *cacheRepository) PurgePayments() error {
