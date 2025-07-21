@@ -1,8 +1,6 @@
 services:
   publisher-consumer-1: &publisher-consumer
-    build:
-      context: .
-      dockerfile: Dockerfile.publisher-consumer
+    build: .
     depends_on:
       redis:
         condition: service_healthy
