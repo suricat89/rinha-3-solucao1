@@ -1,5 +1,9 @@
 # Rinha de Backend 2025
 
+## Página principal do evento
+
+https://github.com/zanfranceschi/rinha-de-backend-2025/tree/main
+
 ## Tecnologias
 
 - Golang 1.24
